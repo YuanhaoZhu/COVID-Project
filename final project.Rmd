@@ -90,4 +90,59 @@ ggplot(comb, aes(long, lat, group = group))+
 
 ```
 
+```{r}
+# plot trend of covid cases and death world wide
+sub_covid<-covid[,c('DATE',"TC","TD")]
+
+sub_covid$FDATE<-as.factor(sub_covid$DATE)
+world_cases<-aggregate(TC~FDATE, data=sub_covid, FUN=sum ,na.action=na.omit)
+world_death<-aggregate(TD~FDATE, data=sub_covid, FUN=sum ,na.action=na.omit)
+world_death<-subset(world_death, select = -c(1) )
+world_cd<-cbind(world_cases,world_death)
+world_cd$logTC<-log(world_cd$TC)
+world_cd$logTD<-log(world_cd$TD)
+ggplot(data = world_cd, aes(x = as.Date(FDATE))) +
+  geom_line(aes(y = logTC, colour = "logTC")) +
+  geom_line(aes(y = logTD, colour = "logTD")) +
+  scale_colour_manual("", values = c("logTC"="green", "logTD"="red")) +
+  xlab("log counts") +
+  ylab("time")+
+  labs(title="total cases and deaths worldwide in log scale")
+
+
+```
+```{r}
+#plot correlation between GDP VS STI AND 
+deathrate<-c()
+for( i in unique(covid$COUNTRY)){
+  d<-covid[covid$COUNTRY==i,11]
+  p<-covid[covid$COUNTRY==i,13]
+  if(all(is.na(p)) |all(is.na(d)) ){rate<-NA}
+  else{
+  totaldeath<-max(d,na.rm=T)
+  population<-max(p,na.rm = T)
+  rate<-(totaldeath/population)*100}
+  deathrate<-c(deathrate,rate)
+}
+```
+
+```{r}
+#correlation of total death vs HDI is different for underdeveloped developing and developed countries, result of the paper may be wrong! 
+quantile(covid$GDPCAP,na.rm=T)
+bygdp<-covid[,c('COUNTRY',"TD","GDPCAP","HDI")]
+bygdp$type[bygdp$GDPCAP<5338.454]<-"UNDERDEVELOPED"
+bygdp$type[bygdp$GDPCAP> 5338.454 &bygdp$GDPCAP<31400.840]<-"DEVELOPING"
+bygdp$type[bygdp$GDPCAP>31400.840 ]<-"DEVELOPED"
+ud<-bygdp[bygdp$type=="UNDERDEVELOPED",]
+d<-bygdp[bygdp$type=="DEVELOPING",]
+dd<-bygdp[bygdp$type=="DEVELOPED",]
+ud_corr<-cor(ud$TD,ud$HDI,use="pairwise.complete.obs")
+d_corr<-cor(d$TD,d$HDI,use="pairwise.complete.obs")
+dd_corr<-cor(dd$TD,dd$HDI,use="pairwise.complete.obs")
+ud_p<-cor.test(ud$TD,ud$HDI,use="pairwise.complete.obs")$p.value
+d_p<-cor.test(d$TD,d$HDI,use="pairwise.complete.obs")$p.value
+dd_p<-cor.test(dd$TD,dd$HDI,use="pairwise.complete.obs")$p.value
+data.frame(type=c("underdeveloped","developing","developed"),corrs=c(ud_corr,d_corr,dd_corr),pval=c(ud_p,d_p,dd_p))
+```
+> In comparison to the paper, we find although in general total death has a positive correlation with HDI, the effect is insignificant for developing country, but is significant for underdeveloped, developed countries. Thus, we can think population control may not be a good idea for developing countries. Also for further regression analysis , we may need to create indicator variable for the degree of developement  for countries. 
 
