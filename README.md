@@ -1,6 +1,8 @@
 # COVID-Project
 Final Project for STICI 4740
-Group Member:
+
+Group Members:
+
 Jiayi Guo, Ziqu Wang, Yuanhao Zhu, Yuhan Hu, Michael Russo.
 
 ## Work Division
