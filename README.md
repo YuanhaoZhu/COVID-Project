@@ -10,6 +10,12 @@ the project can be divided to five parts.
 5. write report (Everyone works on their own part)
 
 ## Part1 Data processing and visualization
-Below screen shot is taken from kitted html:https://github.com/YuanhaoZhu/COVID-Project/blob/main/final-project.html
-Orginal r markdown code is:https://github.com/YuanhaoZhu/COVID-Project/blob/main/final%20project.Rmd
+Below screen shot is taken from kitted html:
+
+https://github.com/YuanhaoZhu/COVID-Project/blob/main/final-project.html
+
+Orginal r markdown code is:
+
+https://github.com/YuanhaoZhu/COVID-Project/blob/main/final%20project.Rmd
+
 <img src="https://github.com/YuanhaoZhu/COVID-Project/blob/main/Part1%20by%20Yuanhao%20Zhu.png">
