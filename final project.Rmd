@@ -144,5 +144,48 @@ d_p<-cor.test(d$TD,d$HDI,use="pairwise.complete.obs")$p.value
 dd_p<-cor.test(dd$TD,dd$HDI,use="pairwise.complete.obs")$p.value
 data.frame(type=c("underdeveloped","developing","developed"),corrs=c(ud_corr,d_corr,dd_corr),pval=c(ud_p,d_p,dd_p))
 ```
-> In comparison to the paper, we find although in general total death has a positive correlation with HDI, the effect is insignificant for developing country, but is significant for underdeveloped, developed countries. Thus, we can think population control may not be a good idea for developing countries. Also for further regression analysis , we may need to create indicator variable for the degree of developement  for countries. 
+> In comparison to the paper, we find although in general total death has a positive correlation with HDI, the effect is insignificant for developing country, but is significant for underdeveloped, developed countries. Thus, we can think population control may not be a good idea for developing countries. Also for further regression analysis , we may need to create indicator variable for the degree of developement  for countries.
+
+
+##Regression Preprocessing
+```{r}
+library('forecast')
+library(tidyverse)
+```
+
+```{r}
+covid$DATE <- as.Date(covid$DATE , format = "%Y-%m-%d")
+```
+
+
+```{r}
+# Time Phase
+begin_phase = min(covid$DATE)
+dev_phase = as.Date("2020-03-01", format = "%Y-%m-%d")
+outbreak_phase = as.Date("2020-07-01", format = "%Y-%m-%d")
+
+covid <- mutate(covid, phase = case_when(
+  DATE < dev_phase ~ 0,
+  DATE >= dev_phase & DATE < outbreak_phase ~ 1,
+  DATE >= outbreak_phase ~ 2
+))
+
+covid <- mutate(covid, mortality_rate = TC/TD)
+
+
+covid$type[covid$GDPCAP<5338.454]<-"UNDERDEVELOPED"
+covid$type[covid$GDPCAP>= 5338.454 & covid$GDPCAP<31400.840]<-"DEVELOPING"
+covid$type[covid$GDPCAP>=31400.840 ]<-"DEVELOPED"
+covid <- drop_na(covid)
+```
+
+##Regression Analysis
+```{r}
+# use covid 
+head(covid)
+```
+
+
+
+ 
 
