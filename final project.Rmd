@@ -105,8 +105,8 @@ ggplot(data = world_cd, aes(x = as.Date(FDATE))) +
   geom_line(aes(y = logTC, colour = "logTC")) +
   geom_line(aes(y = logTD, colour = "logTD")) +
   scale_colour_manual("", values = c("logTC"="green", "logTD"="red")) +
-  xlab("log counts") +
-  ylab("time")+
+  xlab("time") +
+  ylab("log counts")+
   labs(title="total cases and deaths worldwide in log scale")
 
 
@@ -144,48 +144,86 @@ d_p<-cor.test(d$TD,d$HDI,use="pairwise.complete.obs")$p.value
 dd_p<-cor.test(dd$TD,dd$HDI,use="pairwise.complete.obs")$p.value
 data.frame(type=c("underdeveloped","developing","developed"),corrs=c(ud_corr,d_corr,dd_corr),pval=c(ud_p,d_p,dd_p))
 ```
-> In comparison to the paper, we find although in general total death has a positive correlation with HDI, the effect is insignificant for developing country, but is significant for underdeveloped, developed countries. Thus, we can think population control may not be a good idea for developing countries. Also for further regression analysis , we may need to create indicator variable for the degree of developement  for countries.
+> In comparison to the paper, we find although in general total death has a positive correlation with HDI, the effect is insignificant for developing country, but is significant for underdeveloped, developed countries. Thus, we can think population control may not be a good idea for developing countries. Also for further regression analysis , we may need to create indicator variable for the degree of developement  for countries. 
 
-
-##Regression Preprocessing
+##Regression part
 ```{r}
-library('forecast')
 library(tidyverse)
 ```
 
 ```{r}
 covid$DATE <- as.Date(covid$DATE , format = "%Y-%m-%d")
 ```
+```{r}
+#function to calculate mortality rate, return 0 if no case or if no death 
+mrate<-function(td,tc){
+  if (td==0){mortality<-0}
+  else{mortality<-td/tc}
+  return (mortality)
+  
+}
+```
 
 
 ```{r}
 # Time Phase
-begin_phase = min(covid$DATE)
-dev_phase = as.Date("2020-03-01", format = "%Y-%m-%d")
-outbreak_phase = as.Date("2020-07-01", format = "%Y-%m-%d")
-
-covid <- mutate(covid, phase = case_when(
-  DATE < dev_phase ~ 0,
-  DATE >= dev_phase & DATE < outbreak_phase ~ 1,
-  DATE >= outbreak_phase ~ 2
-))
-
-covid <- mutate(covid, mortality_rate = TC/TD)
-
-
-covid$type[covid$GDPCAP<5338.454]<-"UNDERDEVELOPED"
-covid$type[covid$GDPCAP>= 5338.454 & covid$GDPCAP<31400.840]<-"DEVELOPING"
-covid$type[covid$GDPCAP>=31400.840 ]<-"DEVELOPED"
-covid <- drop_na(covid)
+begin_phase = as.Date("2020-02-01", format = "%Y-%m-%d")
+dev_phase = as.Date("2020-05-01", format = "%Y-%m-%d")
+#outbreak_phase = as.Date("2020-07-01", format = "%Y-%m-%d")
+regressiondata <- covid %>%  mutate(PHASE = case_when(
+  DATE<=begin_phase ~ 0,
+  DATE> begin_phase &DATE <=dev_phase ~ 1,
+  DATE>=dev_phase ~ 2
+))%>% filter(DATE==begin_phase |DATE==dev_phase|DATE==outbreak_phase)
+regressiondata$TYPE[regressiondata$GDPCAP<5338.454]<-"UNDERDEVELOPED"
+regressiondata$TYPE[regressiondata$GDPCAP>= 5338.454 & regressiondata$GDPCAP<31400.840]<-"DEVELOPING"
+covid$TYPE[covid$GDPCAP>=31400.840 ]<-"DEVELOPED"
+regressiondata<-drop_na(regressiondata)
+regressiondata$mortality_rate<-as.vector(mapply(mrate,regressiondata$TD,regressiondata$TC))*100
+regressiondata$PHASE<-as.factor(regressiondata$PHASE)
+regressiondata$TYPE<-as.factor(regressiondata$TYPE)
+regressiondata$GDP<- regressiondata$POP *regressiondata$GDPCAP
+regressiondata$logGDP<- log(regressiondata$POP *regressiondata$GDPCAP)
+head(regressiondata)
 ```
 
 ##Regression Analysis
 ```{r}
-# use covid 
-head(covid)
+library("MASS")
+#use robust regression method 
+robust_regression_m1<-rlm(GDPCAP ~ TC+TD +logPOP+HDI+ STI:TYPE+STI:PHASE, data = regressiondata)
+summary(robust_regression_m1)
+regression_m1<-lm(GDPCAP ~ TC+TD +logPOP+HDI+ STI:TYPE+STI:PHASE, data = regressiondata)
+summary(regression_m1)
+```
+```{r}
+stepAIC(regression_m1,direction="both")
+```
+```{r}
+regression_m1_final<-lm(GDPCAP ~ TC+TD +logPOP+HDI+ STI:TYPE, data = regressiondata)
+summary(regression_m1_final)
 ```
 
 
+> Based on our first regression model, we want to investigate the association between STI and GDP per capita. We created three addtional varaible, one is type, which indicates whether a country is developed/ developing or underdeveloped based on gdp per capita. The other variable is phase, which divide the covid period into three main phases: 0 is initial phase, 1 is developing phase, 2 is total outbreak phase. . We created these additional variables in order to study the relationship between STI and GDP per capita in different types of countries and different phases of covid 19. 
+> Our first model regresses GDP per capita against total death, total case, log population, HDI and interaction between STI and type of country and interaction between STI and phase of covid. Thus the formula of our model is : 
 
+GDPCAP = $\beta_1 *TC +\beta_2*TD+\beta_3*logPOP +\beta_4*HDI+ \beta_5*STI*developed+\beta_6*STI*developing +\beta_7*STI*underdeveloped +\beta_8*STI*PHASE1+\beta_9*STI*PHASE2$
+
+> We further used stepwise AIC method for variable selection and found that the STI:PHASE interaction term cannot add siginificant additional information to our model. Thus, we deleted them. Thus, the relationship between STI and GPD per capita is same for all phases of covid19. 
+
+> From the above result, we saw that the inference of covariates of both robust and ordinary least square method are consistent. We saw that there is a positive association between total case and GDPCAP, indicating that economic growth and total case number have a positive association. It makes sense that, the more active and developed the economy, the more easier for the virus to transmit among people due to human-human interactions. total death is negatively associated with GDP per capita. Thus, we can interpret it as the more developed the economy is, the better medical care the country can provide, thus reducing the total death. Population is negatively associated with GDP per capita. Therefore, too much population can negatively impact the economic growth. The stringency index is positively associated with gdp per capital for developed countries and have negative association for  developing and underdeveloped countries. Given it is a developed country, the higher the STI, the higher the GDP per capita. given it is a underdeveloped/ developing country, the higher the STI, the lower the GDP per capita. Thus, for the developed countries,the active economy requires the government to apply much stricter covid policy to prevent further transmission. And for developing and underdeveloped countries, those with higher GDP per capita and more active economy tend to apply less strict policy. This may due to the government chooses not to address COVID issue or the unwillingness to sacrifice the economy. 
  
+
+
+
+> you can start with the second model to investigate the relationship amongst hdi,total death  and types of country 
+
+```{r}
+m2<-lm(HDI~ TC + STI+ GDPCAP+ TD:TYPE,data=regressiondata)
+summary(m2)
+```
+```{r}
+stepAIC(m2,direction="both")
+```
 
