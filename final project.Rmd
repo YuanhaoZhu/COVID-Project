@@ -154,6 +154,7 @@ library(tidyverse)
 ```{r}
 covid$DATE <- as.Date(covid$DATE , format = "%Y-%m-%d")
 ```
+
 ```{r}
 #function to calculate mortality rate, return 0 if no case or if no death 
 mrate<-function(td,tc){
@@ -169,15 +170,17 @@ mrate<-function(td,tc){
 # Time Phase
 begin_phase = as.Date("2020-02-01", format = "%Y-%m-%d")
 dev_phase = as.Date("2020-05-01", format = "%Y-%m-%d")
-#outbreak_phase = as.Date("2020-07-01", format = "%Y-%m-%d")
+outbreak_phase = as.Date("2020-07-01", format = "%Y-%m-%d")
 regressiondata <- covid %>%  mutate(PHASE = case_when(
   DATE<=begin_phase ~ 0,
   DATE> begin_phase &DATE <=dev_phase ~ 1,
   DATE>=dev_phase ~ 2
 ))%>% filter(DATE==begin_phase |DATE==dev_phase|DATE==outbreak_phase)
-regressiondata$TYPE[regressiondata$GDPCAP<5338.454]<-"UNDERDEVELOPED"
-regressiondata$TYPE[regressiondata$GDPCAP>= 5338.454 & regressiondata$GDPCAP<31400.840]<-"DEVELOPING"
-covid$TYPE[covid$GDPCAP>=31400.840 ]<-"DEVELOPED"
+
+# 0 = UNDERDEVELOPED, 1 = DEVELOPING, 2 = DEVELOPED
+regressiondata$TYPE[regressiondata$GDPCAP<5338.454]<- 0
+regressiondata$TYPE[regressiondata$GDPCAP>= 5338.454 & regressiondata$GDPCAP<31400.840]<- 1
+covid$TYPE[covid$GDPCAP>=31400.840 ]<- 2
 regressiondata<-drop_na(regressiondata)
 regressiondata$mortality_rate<-as.vector(mapply(mrate,regressiondata$TD,regressiondata$TC))*100
 regressiondata$PHASE<-as.factor(regressiondata$PHASE)
@@ -196,9 +199,11 @@ summary(robust_regression_m1)
 regression_m1<-lm(GDPCAP ~ TC+TD +logPOP+HDI+ STI:TYPE+STI:PHASE, data = regressiondata)
 summary(regression_m1)
 ```
+
 ```{r}
 stepAIC(regression_m1,direction="both")
 ```
+
 ```{r}
 regression_m1_final<-lm(GDPCAP ~ TC+TD +logPOP+HDI+ STI:TYPE, data = regressiondata)
 summary(regression_m1_final)
@@ -216,14 +221,96 @@ GDPCAP = $\beta_1 *TC +\beta_2*TD+\beta_3*logPOP +\beta_4*HDI+ \beta_5*STI*devel
  
 
 
-
 > you can start with the second model to investigate the relationship amongst hdi,total death  and types of country 
 
 ```{r}
+head(regressiondata)
 m2<-lm(HDI~ TC + STI+ GDPCAP+ TD:TYPE,data=regressiondata)
 summary(m2)
 ```
+
 ```{r}
 stepAIC(m2,direction="both")
 ```
 
+## HDI and GDP Distribution 
+
+```{r}
+library(reshape)
+scaleFUN <- function(x) sprintf("%.5f", x)
+rev <- regressiondata$HDI
+ggplot(data = melt(rev), aes(x = value)) +
+    stat_density() + 
+    ggtitle("Plot of HDI Distribution") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_x_continuous(labels=scales::dollar_format()) +
+    scale_y_continuous(labels=scaleFUN) +
+    geom_vline(xintercept = mean(rev), linetype="dotted", 
+                color = "red", size=1.5) 
+
+```
+
+```{r}
+library(reshape)
+scaleFUN <- function(x) sprintf("%.5f", x)
+rev <- regressiondata$GDPCAP
+ggplot(data = melt(rev), aes(x = value)) +
+    stat_density() + 
+    ggtitle("Plot of GDPCAP Distribution") +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    scale_x_continuous(labels=scales::dollar_format()) +
+    scale_y_continuous(labels=scaleFUN) +
+    geom_vline(xintercept = mean(rev), linetype="dotted", 
+                color = "red", size=1.5) 
+```
+
+> As seen above, HDI and GDP does not follow a normal distribution, thus it is not appropriate to assume linearity. Also, given the ranges of both outputs are $0 to infinity, we hypothesis that these models follow more closely to a Poisson Distribution. Before doing so, lets plot the linear models results to verify our linearity assumptions. 
+
+```{r}
+par(mfrow=c(2,2))
+plot(m2)
+```
+
+
+## Poisson Regressions Analysis
+```{r}
+regressiondata$HDI = as.integer(regressiondata$HDI)
+regressiondata$GDPCAP = as.integer(regressiondata$GDPCAP)
+
+
+gdp.glm <- glm(GDPCAP ~TC + STI+ TD + mortality_rate + TYPE + PHASE, family="poisson", data=regressiondata)
+summary(gdp.glm)
+
+mu <- mean(regressiondata$GDPCAP)
+plot(log(fitted(gdp.glm)),log((regressiondata$GDPCAP-fitted(gdp.glm))^2),xlab=expression(hat(mu)),ylab=expression((y-hat(mu))^2),pch=20,col="blue")
+abline(0,1) 
+dp = sum(residuals(gdp.glm,type ="pearson")^2)/gdp.glm$df.residual
+print(dp)
+```
+
+
+
+> From above, we see in our GDPCAP Poisson Regression model that the residual deviance is not a 1:1 ratio with the degrees of freedom. Thus, meaning that there is overdispersion in our data. THis is verified by plotting the variance against the mean. In the plot, we can see that a large amount of our data has variance above the mean, which leads us to assume that a negative binomial model will provide a better fit. 
+
+```{r}
+library(MASS)
+regressiondata$GDPCAP = as.integer(regressiondata$GDPCAP)
+rev.glm <- glm.nb(GDPCAP ~TC + STI+ TD + HDI + mortality_rate + TYPE + PHASE,data=regressiondata , maxit = 100)
+summary(rev.glm)
+plot(rev.glm)
+```
+
+> From our Negative Binomial model, we can see that the residual variance is very close to a 1:1 ratio with our degrees of freedom and this verifies the accuracy. With that said, we believe the results from the original paper to be questionable. To start, let's look at the effects of COVID, including total deaths and total cases. They are both statistically signifigant for the GDPCAP, but interestingly enough, the total number of cases are positively correlated with GDPCAP, while the total number of deaths are negatively correlated. We believe this is the case because there is a low morality rate from COVID, but when someone does die from COVID, it drastically effects the economy. Additionally, the morality rate per capita is not statistically significant. Rather, given the fact if the country is developing or is developed is more important. 
+
+
+> HELP HERE: why does the Poisson regressions not work for HDI?
+
+```{r}
+hdi.glm <- glm(HDI ~TC + STI+ TD + GDPCAP , family="poisson", data=regressiondata)
+summary(hdi.glm)
+
+mu <- mean(regressiondata$HDI)
+plot(log(fitted(hdi.glm)),log((regressiondata$HDI-fitted(hdi.glm))^2),xlab=expression(hat(mu)),ylab=expression((y-hat(mu))^2),pch=20,col="blue")
+abline(0,1) 
+dp = sum(residuals(hdi.glm,type ="pearson")^2)/hdi.glm$df.residual
+```
