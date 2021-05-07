@@ -167,6 +167,7 @@ mrate<-function(td,tc){
 
 
 ```{r}
+library(tidyverse)
 # Time Phase
 begin_phase = as.Date("2020-02-01", format = "%Y-%m-%d")
 dev_phase = as.Date("2020-05-01", format = "%Y-%m-%d")
@@ -181,7 +182,8 @@ regressiondata <- covid %>%  mutate(PHASE = case_when(
 regressiondata$TYPE[regressiondata$GDPCAP<5338.454]<- 0
 regressiondata$TYPE[regressiondata$GDPCAP>= 5338.454 & regressiondata$GDPCAP<31400.840]<- 1
 covid$TYPE[covid$GDPCAP>=31400.840 ]<- 2
-regressiondata<-drop_na(regressiondata)
+regressiondata<- regressiondata %>%
+  drop_na()
 regressiondata$mortality_rate<-as.vector(mapply(mrate,regressiondata$TD,regressiondata$TC))*100
 regressiondata$PHASE<-as.factor(regressiondata$PHASE)
 regressiondata$TYPE<-as.factor(regressiondata$TYPE)
@@ -273,12 +275,17 @@ plot(m2)
 
 
 ## Poisson Regressions Analysis
+
+```{r}
+```
+
+
 ```{r}
 regressiondata$HDI = as.integer(regressiondata$HDI)
 regressiondata$GDPCAP = as.integer(regressiondata$GDPCAP)
 
 
-gdp.glm <- glm(GDPCAP ~TC + STI+ TD + mortality_rate + TYPE + PHASE, family="poisson", data=regressiondata)
+gdp.glm <- glm(GDPCAP ~ TC + STI+ TD + mortality_rate + TYPE + PHASE, family="poisson", data=regressiondata)
 summary(gdp.glm)
 
 mu <- mean(regressiondata$GDPCAP)
@@ -314,3 +321,113 @@ plot(log(fitted(hdi.glm)),log((regressiondata$HDI-fitted(hdi.glm))^2),xlab=expre
 abline(0,1) 
 dp = sum(residuals(hdi.glm,type ="pearson")^2)/hdi.glm$df.residual
 ```
+
+
+## Decision Tree
+```{r}
+set.seed(4740)
+trainid = sample(nrow(regressiondata), nrow(regressiondata)*0.7, replace = FALSE)
+trainingdata = regressiondata[trainid,]
+testdata = regressiondata[-trainid,]
+library(caret)
+library(rpart)
+library(e1071)
+library(rpart.plot)
+numFold = trainControl(method="cv", number = 10)
+cpGrid = expand.grid(.cp = seq(0.01, 0.5, 0.01))
+train(TYPE~ HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate , data=trainingdata, method = "rpart", trControl =numFold, tuneGrid = cpGrid)
+treeCV = rpart(TYPE ~ HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate, data=trainingdata, method="class", cp=0.05)
+predictCV = predict(treeCV, newdata=testdata, type="class")
+length(predictCV)
+length(testdata$TYPE)
+t = table(testdata$TYPE, predictCV)
+rpart.plot(treeCV)
+confusionMatrix(t)
+```
+
+## Random Forest Part 1
+```{r}
+library(stringr) 
+library("openxlsx")
+library(data.table)
+library(corrplot)
+library(ggpubr)
+library(ggplot2)
+library(Matrix)
+library(lme4)
+library(lmerTest)
+library(factoextra)
+library(cluster)
+library(epiR)
+library("gplots")
+library(randomForest)
+library(pROC)
+```
+
+```{r}
+# Train/test split
+trainid = sample(nrow(regressiondata), nrow(regressiondata)*0.7, replace = FALSE)
+trainingdata = regressiondata[trainid,]
+testdata = regressiondata[-trainid,]
+n<-16
+# Find best Mtree
+m_tree <- c()
+for(i in 1:(n-1)){
+  mtry_fit<-randomForest(TYPE ~ logTC + logTD + logSTI + logPOP + logGDPCAP + HDI + TC + TD +STI +POP + GDPCAP + PHASE +
+                          mortality_rate + GDP + logGDP, data=trainingdata, mtry=i)
+  err<-mean(mtry_fit$err.rate)
+  print(err)
+  m_tree<- c(m_tree, err)
+}
+m_tree
+min(m_tree)
+```
+> The best mtree is with 6, and gives an error of 7.065e-05
+
+
+```{r}
+ntree_fit<-randomForest(TYPE ~ logTC + logTD + logSTI + logPOP  + HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate , data = trainingdata, mtry = 6, ntree = 100, importance = TRUE)
+plot(ntree_fit)
+legend("top", colnames(ntree_fit$err.rate),col=1:4,cex=0.8,fill=1:4)
+
+rf = randomForest(TYPE ~ logTC + logTD + logSTI + logPOP  + HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate, data = trainingdata, mtry = 6, ntree = 20,importance = TRUE, proxmity = TRUE)
+rf
+
+# MDSplot(rf, trainingdata$TYPE)
+
+importance<-importance(rf)
+importance
+
+
+varImpPlot(rf, main = "variable importance")
+
+pred1<-predict(rf, data=trainingdata)
+Freq1<-table(pred1, trainingdata$TYPE)
+sum(diag(Freq1))/sum(Freq1)
+
+plot(margin(rf,trainingdata$TYPE))
+
+
+pre <- predict(rf,newdata=testdata)
+
+obs_p_ran = data.frame(prob=pre,obs=testdata$TYPE)
+
+table(testdata$TYPE,pre,dnn=c("real","predict"))
+
+ran_roc <- roc(testdata$TYPE,as.numeric(pre))
+plot(ran_roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),grid.col=c("green", "red"), max.auc.polygon=TRUE,auc.polygon.col="skyblue", print.thres=TRUE,main='RandomForest ROC,mtry=4,ntree=20')
+#MDSplot(rf,fac=data_train$Level)
+par(mfrow=c(1,2))
+
+varImpPlot(rf, main = "variable importance")
+plot(ran_roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),grid.col=c("green", "red"), max.auc.polygon=TRUE,auc.polygon.col="skyblue", print.thres=TRUE,main='RandomForest ROC,mtry=4,ntree=20')
+```
+
+
+
+
+
