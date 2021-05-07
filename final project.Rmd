@@ -311,6 +311,7 @@ plot(rev.glm)
 
 
 > HELP HERE: why does the Poisson regressions not work for HDI?
+
 ```{r}
 hdi.glm <- glm(HDI ~TC + STI+ TD + GDPCAP , family="poisson", data=regressiondata)
 summary(hdi.glm)
