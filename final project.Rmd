@@ -1,6 +1,6 @@
 ---
 title: "final project"
-author: "Yuanhao Zhu"
+author: "Yuanhao Zhu, Michael Russo, Yuhan Hu, Jiayi Guo, Ziqu Wang"
 date: "4/18/2021"
 output: html_document
 ---
@@ -187,6 +187,15 @@ regressiondata$logGDP<- log(regressiondata$POP *regressiondata$GDPCAP)
 head(regressiondata)
 ```
 
+```{r}
+library(corrplot)
+corrdata <- regressiondata[c(9:18) ]
+corrdata$TYPE <- as.numeric(factor(corrdata$TYPE))
+corrdata$PHASE <-as.numeric(corrdata$PHASE)
+cor1 = cor(corrdata)
+corrplot.mixed(cor1, lower.col = 'black', number.cex = .7)
+```
+
 ##Regression Analysis
 ```{r}
 library("MASS")
@@ -226,7 +235,14 @@ summary(m2_robust)
 stepAIC(m2,direction="both")
 ```
 
-> add interpretation !!!!!
+ > Our second model regresses HDI against log total cases, stringency index, log population and interaction between log total deaths and country development type. Thus the formula of our model is ：
+
+HDI = $\beta_1 *logTC +\beta_2*STI+\beta_3*logPOP + \beta_4*logTD*developed+\beta_5*logTD*developing +\beta_6*logTD*underdeveloped $
+
+> Similar to the GDPCAP models, we saw that both robust and ordinary least square method are consistent with the inference of covariates. Moreover, we found a positive association between log total deaths to human development index. This can be interpreted as countries with high poverty alleviation is positively correlated with COVID-19 cases. From our correlation table, we found a high correlation between HDI and GDP, thus confirming that countries with high HDI can easily spread the virus from human-to-human interactions. Additionally, we can see a negative association between HDI and STI. This seems intuitive because as the pandemic lockdown protocol becomes more strict, it also restricts businesses from operating under normal conditions. Interestingly, the human development index is positively associated with total deaths in developing countries, while negatively associated with total deaths in underdeveloping countries. With the mixed correlations, we are able to infer that COVID deaths are relative to the counties development status. Finally, we found a negative correlation between a countries population and HDI. We can assume that if a country has a larger population size, then there are more opportunities to contribute to the overall growth and wellbeing.  
+
+> From our stepwise AIC method, the AIC score stayed within an absolute value of 2, thus confiming that removing any variables will not lead to any significant changes to our models performance. 
+
 
 
 ```{r}
@@ -276,6 +292,105 @@ ggplot(data=error_result, aes(x=threshold, y=prediction_error)) +
 > Thus, severity of covid-19 is neither correlated with GDP per capita nor HDI. Severity is positively correlated with the interaction terms. In each category, no matter whether a country is developed, developing or underdeveloped, the larger the population, the higher the probability the covid situation is severe in this country. 
 > This result is consistent with what we observed in reality. When the COVID-19 was initially found in Wuhan, China. Many people believed that developed countries, with superior medical system and technology,can successfully combat the disease. However, we actually found that the condition of covid-19 was surprisingly severe in many of the developed countries. Thus, our result is also consistent with what we observed in reality that severity has nothing to do with GDP per capita nor HDI level. 
 
+# Decision Tree
+```{r}
+library(caret)
+library(rpart)
+library(e1071)
+library(rpart.plot)
+
+trainid = sample(nrow(regressiondata), nrow(regressiondata)*0.7, replace = FALSE)
+trainingdata = regressiondata[trainid,]
+testdata = regressiondata[-trainid,]
+
+numFold = trainControl(method="cv", number = 10)
+cpGrid = expand.grid(.cp = seq(0.01, 0.5, 0.01))
+train(TYPE~ HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate , data=trainingdata, method = "rpart", trControl =numFold, tuneGrid = cpGrid)
+treeCV = rpart(TYPE ~ HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate, data=trainingdata, method="class", cp=0.05)
+predictCV = predict(treeCV, newdata=testdata, type="class")
+length(predictCV)
+length(testdata$TYPE)
+t = table(testdata$TYPE, predictCV)
+rpart.plot(treeCV)
+confusionMatrix(t)
+```
+
+## Random Forest
+```{r}
+# library(stringr)
+# library("openxlsx")
+# library(data.table)
+# library(corrplot)
+# library(ggpubr)
+# library(ggplot2)
+# library(Matrix)
+# library(lme4)
+# library(lmerTest)
+# library(factoextra)
+# library(cluster)
+# library(epiR)
+library("gplots")
+library(randomForest)
+library(pROC)
+```
+
+```{r}
+# Train/test split
+trainid = sample(nrow(regressiondata), nrow(regressiondata)*0.7, replace = FALSE)
+trainingdata = regressiondata[trainid,]
+testdata = regressiondata[-trainid,]
+n<-16
+# Find best Mtree
+m_tree <- c()
+for(i in 1:(n-1)){
+  mtry_fit<-randomForest(TYPE ~ logTC + logTD + logSTI + logPOP + logGDPCAP + HDI + TC + TD +STI +POP + GDPCAP + PHASE +
+                          mortality_rate + GDP + logGDP, data=trainingdata, mtry=i)
+  err<-mean(mtry_fit$err.rate)
+  print(err)
+  m_tree<- c(m_tree, err)
+}
+m_tree
+min(m_tree)
+```
+
+
+```{r}
+trainingdata$TYPE <- as.numeric(factor(trainingdata$TYPE))
+
+ntree_fit<-randomForest(TYPE ~ logTC + logTD + logSTI + logPOP  + HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate , data = trainingdata, mtry = 6, ntree = 100, importance = TRUE)
+plot(ntree_fit)
+# legend("top", colnames(ntree_fit$err.rate),col=1:4,cex=0.8,fill=1:4)
+
+rf = randomForest(TYPE ~ logTC + logTD + logSTI + logPOP  + HDI + TC + TD +STI +POP  + PHASE +
+                          mortality_rate, data = trainingdata, mtry = 6, ntree = 20,importance = TRUE, proxmity = TRUE)
+rf
+
+
+importance<-importance(rf)
+importance
+
+
+varImpPlot(rf, main = "variable importance")
+
+pred1<-predict(rf, data=trainingdata)
+Freq1<-table(pred1, trainingdata$TYPE)
+sum(diag(Freq1))/sum(Freq1)
+
+
+pre <- predict(rf,newdata=testdata)
+
+obs_p_ran = data.frame(prob=pre,obs=testdata$TYPE)
+
+table(testdata$TYPE,pre,dnn=c("real","predict"))
+
+ran_roc <- roc(testdata$TYPE,as.numeric(pre))
+plot(ran_roc, print.auc=TRUE, auc.polygon=TRUE, grid=c(0.1, 0.2),grid.col=c("green", "red"), max.auc.polygon=TRUE,auc.polygon.col="skyblue", print.thres=TRUE,main='RandomForest ROC,mtry=4,ntree=20')
+par(mfrow=c(1,2))
+
+```
 
 
 
